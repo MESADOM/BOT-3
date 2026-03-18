@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import LONG as modulo_long_trend
+import SORT as modulo_short_trend
 
 
 # ============================================================
@@ -53,7 +54,7 @@ REGIMEN_SHORT_TREND = "SHORT_TREND"
 REGIMEN_MEAN_REVERSION = "MEAN_REVERSION"
 REGIMEN_NO_TRADE = "NO_TRADE"
 
-MODO_META = "LONG_ONLY"
+MODO_META = "LONG_SHORT"
 
 
 # ============================================================
@@ -391,6 +392,22 @@ def detectar_meta_regimen(hoy: Dict[str, Any]) -> str:
     if MODO_META == "LONG_ONLY":
         return REGIMEN_LONG_TREND
 
+    if MODO_META == "SHORT_ONLY":
+        return REGIMEN_SHORT_TREND
+
+    if MODO_META == "LONG_SHORT":
+        qqq_mayor_sma200 = hoy.get("qqq_mayor_sma200")
+        retorno_estado = hoy.get("retorno_estado")
+        cruces_estado = hoy.get("cruces_estado")
+
+        if qqq_mayor_sma200 is True and retorno_estado in ("POSITIVO", "NEUTRAL") and cruces_estado != "ALTO":
+            return REGIMEN_LONG_TREND
+
+        if qqq_mayor_sma200 is False and retorno_estado == "NEGATIVO":
+            return REGIMEN_SHORT_TREND
+
+        return REGIMEN_NO_TRADE
+
     return REGIMEN_NO_TRADE
 
 
@@ -430,6 +447,7 @@ def preparar_datos(
     rows: List[Dict[str, Any]] = []
     closes: List[float] = []
     ultimas_senales: List[bool] = []
+    ultimas_senales_short: List[bool] = []
     n_confirmacion = max(1, int(DIAS_CONFIRMACION_ENTRADA))
 
     regimen_sizing_actual = REGIMEN_DEFENSIVO
@@ -470,6 +488,8 @@ def preparar_datos(
             row["qqq_media_larga"] = None
             row["senal_base_on"] = False
             row["senal_confirmada"] = False
+            row["senal_short_base_on"] = False
+            row["senal_short_confirmada"] = False
             row["sma50"] = None
             rows.append(row)
             continue
@@ -482,11 +502,17 @@ def preparar_datos(
         row["sma50"] = sma50
         row["qqq_media_larga"] = sma50
         row["senal_base_on"] = bool(sma50 is not None and close_float > sma50)
+        row["senal_short_base_on"] = bool(sma50 is not None and close_float < sma50)
 
         ultimas_senales.append(bool(row["senal_base_on"]))
         if len(ultimas_senales) > n_confirmacion:
             ultimas_senales.pop(0)
         row["senal_confirmada"] = len(ultimas_senales) == n_confirmacion and all(ultimas_senales)
+
+        ultimas_senales_short.append(bool(row["senal_short_base_on"]))
+        if len(ultimas_senales_short) > n_confirmacion:
+            ultimas_senales_short.pop(0)
+        row["senal_short_confirmada"] = len(ultimas_senales_short) == n_confirmacion and all(ultimas_senales_short)
 
         if _es_momento_revision_regimen(fecha, ultima_semana_revisada):
             variables_regimen = calcular_variables_regimen(closes=closes, idx=len(closes) - 1)
@@ -549,7 +575,12 @@ def ejecutar_meta_bot(
 
         if salida_pendiente and operacion_abierta is not None:
             precio_salida = qqq3_open_manana
-            beneficio_bruto = (precio_salida - operacion_abierta.precio_entrada) * operacion_abierta.unidades
+            if operacion_abierta.modulo_activo == REGIMEN_LONG_TREND:
+                beneficio_bruto = (precio_salida - operacion_abierta.precio_entrada) * operacion_abierta.unidades
+            elif operacion_abierta.modulo_activo == REGIMEN_SHORT_TREND:
+                beneficio_bruto = (operacion_abierta.precio_entrada - precio_salida) * operacion_abierta.unidades
+            else:
+                beneficio_bruto = 0.0
             beneficio_neto = beneficio_bruto - COMISION_POR_OPERACION_EUR
 
             rentabilidad_pct = 0.0
@@ -558,7 +589,12 @@ def ejecutar_meta_bot(
 
             capital_actual += beneficio_neto
             beneficio_acumulado_eur = capital_actual - CAPITAL_INICIAL_EUR
-            stop_trailing = modulo_long_trend.calcular_stop_trailing(operacion_abierta)
+            if operacion_abierta.modulo_activo == REGIMEN_LONG_TREND:
+                stop_trailing = modulo_long_trend.calcular_stop_trailing(operacion_abierta)
+            elif operacion_abierta.modulo_activo == REGIMEN_SHORT_TREND:
+                stop_trailing = modulo_short_trend.calcular_stop_trailing(operacion_abierta)
+            else:
+                stop_trailing = 0.0
 
             operaciones.append(
                 {
@@ -627,7 +663,11 @@ def ejecutar_meta_bot(
                     capital_antes_eur=capital_actual,
                     maximo_desde_entrada=qqq3_open_manana,
                     minimo_desde_entrada=qqq3_open_manana,
-                    senal_entrada=f"QQQ>SMA{PERIODO_MEDIA_LARGA} x{DIAS_CONFIRMACION_ENTRADA}",
+                    senal_entrada=(
+                        f"QQQ>SMA{PERIODO_MEDIA_LARGA} x{DIAS_CONFIRMACION_ENTRADA}"
+                        if modulo_entrada_pendiente == REGIMEN_LONG_TREND
+                        else f"QQQ<SMA{PERIODO_MEDIA_LARGA} x{DIAS_CONFIRMACION_ENTRADA}"
+                    ),
                     regimen_entrada=regimen_entrada_pendiente,
                     porcentaje_objetivo_entrada=porcentaje_objetivo,
                     max_unidades_entrada=max_unidades,
@@ -677,9 +717,37 @@ def ejecutar_meta_bot(
                         "motivo_regimen": hoy.get("motivo_regimen", ""),
                     }
 
+            elif meta_regimen_hoy == REGIMEN_SHORT_TREND:
+                permitir_entrada = modulo_short_trend.permite_entrada(
+                    hoy=hoy,
+                    ultima_fecha_salida_ejecutada=ultima_fecha_salida_ejecutada,
+                    operaciones=operaciones,
+                )
+
+                if permitir_entrada:
+                    entrada_pendiente = True
+                    modulo_entrada_pendiente = REGIMEN_SHORT_TREND
+                    regimen_entrada_pendiente = str(hoy.get("regimen_sizing", REGIMEN_DEFENSIVO))
+                    diagnostico_entrada_pendiente = {
+                        "score_regimen": hoy.get("score_regimen", 0),
+                        "qqq_close_referencia": hoy.get("qqq_close_referencia", hoy.get("qqq_close", 0.0) or 0.0),
+                        "sma200_referencia": hoy.get("sma200_referencia"),
+                        "qqq_mayor_sma200": hoy.get("qqq_mayor_sma200"),
+                        "retorno_63": hoy.get("retorno_63"),
+                        "retorno_estado": hoy.get("retorno_estado", "NEUTRAL"),
+                        "cruces_sma50_ventana": hoy.get("cruces_sma50_ventana", 0),
+                        "cruces_estado": hoy.get("cruces_estado", "NO_ALTO"),
+                        "motivo_regimen": hoy.get("motivo_regimen", ""),
+                    }
+
         else:
             if operacion_abierta.modulo_activo == REGIMEN_LONG_TREND:
                 motivo_salida = modulo_long_trend.senal_salida(hoy, operacion_abierta)
+                if motivo_salida:
+                    salida_pendiente = True
+                    motivo_salida_pendiente = motivo_salida
+            elif operacion_abierta.modulo_activo == REGIMEN_SHORT_TREND:
+                motivo_salida = modulo_short_trend.senal_salida(hoy, operacion_abierta)
                 if motivo_salida:
                     salida_pendiente = True
                     motivo_salida_pendiente = motivo_salida
@@ -883,3 +951,4 @@ if __name__ == "__main__":
         ],
         tabla_detalle_operaciones,
     )
+
