@@ -480,13 +480,25 @@ def preparar_datos(
 
         row["sma50"] = sma50
         row["qqq_media_larga"] = sma50
+        
         row["senal_base_on"] = bool(sma50 is not None and close_float > sma50)
-
+        row["senal_short_base_on"] = bool(sma50 is not None and close_float < sma50)
+        
         ultimas_senales.append(bool(row["senal_base_on"]))
         if len(ultimas_senales) > n_confirmacion:
             ultimas_senales.pop(0)
         row["senal_confirmada"] = len(ultimas_senales) == n_confirmacion and all(ultimas_senales)
-
+        
+        # confirmacion short independiente
+        if "ultimas_senales_short" not in locals():
+            ultimas_senales_short = []
+        
+        ultimas_senales_short.append(bool(row["senal_short_base_on"]))
+        if len(ultimas_senales_short) > n_confirmacion:
+            ultimas_senales_short.pop(0)
+        row["senal_short_confirmada"] = (
+            len(ultimas_senales_short) == n_confirmacion and all(ultimas_senales_short)
+        )
         if _es_momento_revision_regimen(fecha, ultima_semana_revisada):
             variables_regimen = calcular_variables_regimen(closes=closes, idx=len(closes) - 1)
             info_regimen = evaluar_regimen_sizing(variables_regimen, qqq_close_referencia=close_float)
