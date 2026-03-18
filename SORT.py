@@ -1,8 +1,29 @@
 from typing import Any, Dict, List, Optional
 
 
-TRAILING_STOP_PCT = 0.12
+TRAILING_STOP_PCT = 0.08
 DIAS_BLOQUEO_REENTRADA = 5
+RETORNO_63_UMBRAL_SHORT = -0.08
+CRUCES_SMA50_MAXIMOS_SHORT = 4
+
+
+def _estructura_bajista_real(hoy: Dict[str, Any]) -> bool:
+    qqq_mayor_sma200 = hoy.get("qqq_mayor_sma200")
+    sma50 = hoy.get("sma50")
+    sma200 = hoy.get("sma200_referencia")
+    retorno_63 = hoy.get("retorno_63")
+    cruces_sma50 = int(hoy.get("cruces_sma50_ventana", 0) or 0)
+
+    if qqq_mayor_sma200 is not False:
+        return False
+
+    if sma50 is None or sma200 is None or not float(sma50) < float(sma200):
+        return False
+
+    if retorno_63 is None or not float(retorno_63) < RETORNO_63_UMBRAL_SHORT:
+        return False
+
+    return cruces_sma50 < CRUCES_SMA50_MAXIMOS_SHORT
 
 
 def permite_entrada(
@@ -20,6 +41,9 @@ def permite_entrada(
     if not bool(hoy.get("senal_short_confirmada", False)):
         return False
 
+    if not _estructura_bajista_real(hoy):
+        return False
+
     permitir_nueva_entrada = True
     dias_desde_ultima_salida = None
 
@@ -32,7 +56,7 @@ def permite_entrada(
 
     bloquear_por_retorno_y_cruces = (
         retorno_63_hoy is not None
-        and retorno_63_hoy < -0.04
+        and retorno_63_hoy < RETORNO_63_UMBRAL_SHORT
         and cruces_sma50_hoy >= 4
     )
 
@@ -40,7 +64,7 @@ def permite_entrada(
         dias_desde_ultima_salida is not None
         and 5 <= dias_desde_ultima_salida <= 9
         and retorno_63_hoy is not None
-        and retorno_63_hoy < -0.04
+        and retorno_63_hoy < RETORNO_63_UMBRAL_SHORT
     )
 
     bloqueo_ultima_operacion_perdedora = (

@@ -15,7 +15,7 @@ import SORT as modulo_short_trend
 # CONFIG
 # ============================================================
 
-VERSION_SISTEMA = "2.1.1"
+VERSION_SISTEMA = "2.2.1"
 
 BASE_DIR = Path(__file__).resolve().parent
 DIR_DATOS = BASE_DIR / "datos"
@@ -192,6 +192,13 @@ def construir_tablas_salida(resultados: Dict[str, Any]) -> Tuple[List[Dict[str, 
             {
                 "Fecha entrada": fila.get("fecha_entrada"),
                 "Fecha salida": fila.get("fecha_salida"),
+                "Modulo activo": (
+                    "LONG_TREND"
+                    if "QQQ>SMA50" in str(fila.get("senal_entrada", ""))
+                    else "SHORT_TREND"
+                    if "QQQ<SMA50" in str(fila.get("senal_entrada", ""))
+                    else ""
+                ),
                 "Señal entrada": fila.get("senal_entrada"),
                 "Precio entrada": fila.get("precio_entrada"),
                 "Precio salida": fila.get("precio_salida"),
@@ -912,7 +919,7 @@ if __name__ == "__main__":
     resultados = ejecutar_bot()
     tabla_resumen_anual, tabla_detalle_operaciones = construir_tablas_salida(resultados)
 
-    print(f"Version sistema: {resultados['version_bot']}")
+    print(f"Version sistema: {resultados['version_bot']}\n")
     imprimir_tabla_tsv(
         [
             "Año",
@@ -932,6 +939,7 @@ if __name__ == "__main__":
         [
             "Fecha entrada",
             "Fecha salida",
+            "Modulo activo",
             "Señal entrada",
             "Precio entrada",
             "Precio salida",
