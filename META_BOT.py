@@ -7,14 +7,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-import modulo_long_trend
+import LONG as modulo_long_trend
 
 
 # ============================================================
 # CONFIG
 # ============================================================
 
-VERSION_SISTEMA = "2.0.0-meta-long"
+VERSION_SISTEMA = "1.3.5"
 
 BASE_DIR = Path(__file__).resolve().parent
 DIR_DATOS = BASE_DIR / "datos"
@@ -24,8 +24,8 @@ RUTA_QQQ3 = DIR_DATOS / "QQQ3.csv"
 RUTA_VIX = DIR_DATOS / "VIX.csv"
 
 GUARDAR_RESULTADOS = False
-RUTA_SALIDA_OPERACIONES = DIR_DATOS / "operaciones_generadas_v2.csv"
-RUTA_SALIDA_RESUMEN = DIR_DATOS / "resumen_anual_generado_v2.csv"
+RUTA_SALIDA_OPERACIONES = DIR_DATOS / "operaciones_generadas.csv"
+RUTA_SALIDA_RESUMEN = DIR_DATOS / "resumen_anual_generado.csv"
 
 CAPITAL_INICIAL_EUR = 1000.0
 COMISION_POR_OPERACION_EUR = 2.0
@@ -140,6 +140,76 @@ def guardar_csv(ruta: Path, filas: List[Dict[str, Any]]) -> None:
                 else:
                     serializada[k] = v
             writer.writerow(serializada)
+
+
+def _serializar_tsv(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return ""
+        texto = f"{value:.10f}".rstrip("0").rstrip(".")
+        return "0" if texto in {"", "-0"} else texto
+    return str(value)
+
+
+def imprimir_tabla_tsv(columnas: List[str], filas: List[Dict[str, Any]]) -> None:
+    print("\t".join(columnas))
+    for fila in filas:
+        print("\t".join(_serializar_tsv(fila.get(columna)) for columna in columnas))
+
+
+def construir_tablas_salida(resultados: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    resumen_anual = []
+    for fila in resultados["resumen_anual"]:
+        resumen_anual.append(
+            {
+                "Año": fila.get("anio"),
+                "Operaciones": fila.get("operaciones"),
+                "Beneficio neto €": fila.get("beneficio_neto_eur"),
+                "Ganadoras": fila.get("ganadoras"),
+                "Perdedoras": fila.get("perdedoras"),
+                "Win rate %": fila.get("win_rate_pct"),
+                "Capital acumulado €": fila.get("capital_acumulado_eur"),
+                "Rentabilidad %": fila.get("rentabilidad_pct"),
+                "Drawdown máx %": fila.get("drawdown_max_pct"),
+            }
+        )
+
+    operaciones_ordenadas = sorted(
+        resultados["operaciones"],
+        key=lambda fila: (fila["fecha_entrada"], fila["fecha_salida"]),
+    )
+    detalle_operaciones = []
+    for fila in operaciones_ordenadas:
+        detalle_operaciones.append(
+            {
+                "Fecha entrada": fila.get("fecha_entrada"),
+                "Fecha salida": fila.get("fecha_salida"),
+                "Señal entrada": fila.get("senal_entrada"),
+                "Precio entrada": fila.get("precio_entrada"),
+                "Precio salida": fila.get("precio_salida"),
+                "Unidades": fila.get("unidades"),
+                "Motivo salida": fila.get("motivo_salida"),
+                "Beneficio acumulado €": fila.get("beneficio_acumulado_eur"),
+                "Rentabilidad %": fila.get("rentabilidad_pct"),
+                "Capital acumulado €": fila.get("capital_acumulado_eur"),
+                "Beneficio neto €": fila.get("beneficio_neto_eur"),
+                "Regimen vigente": fila.get("regimen_vigente", fila.get("regimen_entrada")),
+                "Motivo régimen": fila.get("motivo_regimen"),
+                "Porcentaje capital usado": fila.get("porcentaje_real_invertido"),
+                "Capital antes entrada €": fila.get("capital_antes_eur"),
+                "QQQ > SMA200": fila.get("qqq_mayor_sma200"),
+                "Retorno 63": fila.get("retorno_63"),
+                "Cruces SMA50": fila.get("cruces_sma50_ventana"),
+            }
+        )
+
+    return resumen_anual, detalle_operaciones
 
 
 def _normalizar_columnas(rows: Iterable[Dict[str, Any]], prefijo: str) -> List[Dict[str, Any]]:
@@ -771,9 +841,44 @@ def ejecutar_bot() -> Dict[str, Any]:
 
 if __name__ == "__main__":
     resultados = ejecutar_bot()
+    tabla_resumen_anual, tabla_detalle_operaciones = construir_tablas_salida(resultados)
 
-    print(f"Bot ejecutado correctamente. Version: {resultados['version_bot']}")
-    print(f"Filas base: {len(resultados['datos_base'])}")
-    print(f"Operaciones cerradas: {len(resultados['operaciones'])}")
-    print(f"Anios en resumen: {len(resultados['resumen_anual'])}")
-    print("Metricas diagnosticas:", resultados["metricas"])
+    print(f"Version sistema: {resultados['version_bot']}")
+    imprimir_tabla_tsv(
+        [
+            "Año",
+            "Operaciones",
+            "Beneficio neto €",
+            "Ganadoras",
+            "Perdedoras",
+            "Win rate %",
+            "Capital acumulado €",
+            "Rentabilidad %",
+            "Drawdown máx %",
+        ],
+        tabla_resumen_anual,
+    )
+    print()
+    imprimir_tabla_tsv(
+        [
+            "Fecha entrada",
+            "Fecha salida",
+            "Señal entrada",
+            "Precio entrada",
+            "Precio salida",
+            "Unidades",
+            "Motivo salida",
+            "Beneficio acumulado €",
+            "Rentabilidad %",
+            "Capital acumulado €",
+            "Beneficio neto €",
+            "Regimen vigente",
+            "Motivo régimen",
+            "Porcentaje capital usado",
+            "Capital antes entrada €",
+            "QQQ > SMA200",
+            "Retorno 63",
+            "Cruces SMA50",
+        ],
+        tabla_detalle_operaciones,
+    )
