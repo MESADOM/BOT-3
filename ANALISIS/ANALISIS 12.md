@@ -57,11 +57,9 @@ Se mantuvo intacta la lógica short base de la 2.2.1 y solo se añadió, antes d
 - `ANALISIS/ANALISIS 11.md` **no estaba presente en el repositorio**, así que no pudo utilizarse.
 
 ### Implementación de prueba
-- Se creó un script auxiliar de trabajo, `analysis_12.py`, que:
-  - ejecuta el backtest actual;
-  - enriquece el dataset diario con métricas extra (`dist_sma50`, `dist_sma200`, `retorno_21_extra`, `vol21_anual`);
-  - aplica cada variante como filtro adicional sobre `SORT.permite_entrada`;
-  - recalcula resultados completos del sistema para cada variante.
+- La comparación se ejecutó de forma auxiliar sobre el motor actual, enriqueciendo el dataset diario con métricas extra (`dist_sma50`, `dist_sma200`, `retorno_21_extra`, `vol21_anual`).
+- Sobre esa base se aplicó cada variante como filtro adicional previo a `SORT.permite_entrada` y se recalcularon los resultados completos del sistema para cada caso.
+- El entregable final de esta tarea queda concentrado únicamente en este archivo `ANALISIS/ANALISIS 12.md`.
 
 ### Métricas comparadas
 Para cada variante se midió al menos:
