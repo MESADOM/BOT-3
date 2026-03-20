@@ -5,6 +5,7 @@ TRAILING_STOP_PCT = 0.08
 DIAS_BLOQUEO_REENTRADA = 5
 RETORNO_63_UMBRAL_SHORT = -0.08
 CRUCES_SMA50_MAXIMOS_SHORT = 4
+UMBRAL_BLOQUEO_SOBREEXTENSION_SHORT_SMA200 = -0.15
 
 
 def _estructura_bajista_real(hoy: Dict[str, Any]) -> bool:
@@ -24,6 +25,38 @@ def _estructura_bajista_real(hoy: Dict[str, Any]) -> bool:
         return False
 
     return cruces_sma50 < CRUCES_SMA50_MAXIMOS_SHORT
+
+
+def _distancia_qqq_sma200(hoy: Dict[str, Any]) -> Optional[float]:
+    """
+    Equivalencia exacta usada por la candidata experimental:
+    `QQQ / SMA200 - 1` == `qqq_close_referencia / sma200_referencia - 1`.
+    """
+    qqq_close = hoy.get("qqq_close_referencia", hoy.get("qqq_close"))
+    sma200 = hoy.get("sma200_referencia")
+
+    if qqq_close is None or sma200 is None:
+        return None
+
+    sma200_float = float(sma200)
+    if sma200_float == 0.0:
+        return None
+
+    return (float(qqq_close) / sma200_float) - 1.0
+
+
+def _bloquear_short_por_sobreextension_sma200(hoy: Dict[str, Any]) -> bool:
+    """
+    Filtro short integrado globalmente en el sistema.
+
+    Regla exacta:
+    bloquear entrada short si `QQQ / SMA200 - 1 <= -0.15`.
+    """
+    distancia_qqq_sma200 = _distancia_qqq_sma200(hoy)
+    if distancia_qqq_sma200 is None:
+        return False
+
+    return distancia_qqq_sma200 <= UMBRAL_BLOQUEO_SOBREEXTENSION_SHORT_SMA200
 
 
 def permite_entrada(
@@ -79,6 +112,7 @@ def permite_entrada(
         and not bloquear_por_retorno_y_cruces
         and not bloqueo_reentrada_cercana
         and not bloqueo_ultima_operacion_perdedora
+        and not _bloquear_short_por_sobreextension_sma200(hoy)
     )
 
 
