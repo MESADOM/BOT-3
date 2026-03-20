@@ -2,7 +2,7 @@
 
 ## 1. Objetivo
 
-Auditar históricamente la familia de reglas de **reducción porcentual de exposición condicionada por régimen**, trabajando sobre el **sistema general long-short vigente** y sobre el **selector provisional actualmente aceptado como base**, para decidir si esta línea merece más prioridad que la familia de **tope nominal** estudiada en `ANALISIS 72` o si introduce demasiada sensibilidad adicional para la mejora que realmente aporta.
+Auditar históricamente la familia de reglas de **reducción porcentual de exposición condicionada por régimen**, trabajando sobre el **sistema general long-short vigente** y sobre el **selector provisional actualmente aceptado como base**, para decidir si esta línea merece más prioridad que la alternativa de **tope nominal** o si introduce demasiada sensibilidad adicional para la mejora que realmente aporta.
 
 El alcance se ha mantenido estrictamente dentro de lo pedido:
 
@@ -283,7 +283,7 @@ La versión uniforme, por tanto, parece **bastante frágil** si el porcentaje su
 
 ### 7.3. Comparación explícita contra la familia nominal
 
-En comparación con `ANALISIS 72`, la familia porcentual parece:
+En comparación con la alternativa de **tope nominal**, la familia porcentual parece:
 
 - **más flexible**, porque no introduce cortes bruscos ni topes absolutos que choquen con el crecimiento del capital;
 - **más útil históricamente**, porque sí muestra alguna mejora de drawdown y preserva mucho mejor `2024–2025` cuando los recortes son moderados;
@@ -336,7 +336,7 @@ Aun así, su dependencia es menos incómoda que la de la familia nominal porque,
 
 ## 9. Conclusión final
 
-La familia de **reducción porcentual de exposición por régimen** sale históricamente mejor parada que la familia de **tope nominal** auditada en `ANALISIS 72`, pero no como una solución ya validada sino como una línea con potencial y con reservas claras.
+La familia de **reducción porcentual de exposición por régimen** sale históricamente mejor parada que la alternativa de **tope nominal**, pero no como una solución ya validada sino como una línea con potencial y con reservas claras.
 
 La evidencia principal es esta:
 
