@@ -15,7 +15,7 @@ import SORT as modulo_short_trend
 # CONFIG
 # ============================================================
 
-VERSION_SISTEMA = "2.2.2"
+VERSION_SISTEMA = "2.2.3"
 
 BASE_DIR = Path(__file__).resolve().parent
 DIR_DATOS = BASE_DIR / "datos"
@@ -30,6 +30,8 @@ RUTA_SALIDA_RESUMEN = DIR_DATOS / "resumen_anual_generado.csv"
 
 CAPITAL_INICIAL_EUR = 1000.0
 COMISION_POR_OPERACION_EUR = 2.0
+STOP_MONETARIO_EUR = -200.0
+MOTIVO_SALIDA_STOP_MONETARIO = "STOP_MONETARIO_200"
 
 PERIODO_MEDIA_LARGA = 50
 DIAS_CONFIRMACION_ENTRADA = 1
@@ -70,6 +72,10 @@ class OperacionAbierta:
     capital_antes_eur: float
     maximo_desde_entrada: float
     minimo_desde_entrada: float
+    max_ganancia_flotante_eur: float
+    max_perdida_flotante_eur: float
+    fecha_max_ganancia_flotante: datetime
+    fecha_max_perdida_flotante: datetime
     senal_entrada: str
     regimen_entrada: str
     porcentaje_objetivo_entrada: float
@@ -155,7 +161,7 @@ def _serializar_tsv(value: Any) -> str:
             return ""
         texto = f"{value:.10f}".rstrip("0").rstrip(".")
         texto = "0" if texto in {"", "-0"} else texto
-        return texto.replace(".", ",")
+        return texto
     return str(value).replace("\t", " ").replace("\r", " ").replace("\n", " ")
 
 
@@ -192,29 +198,35 @@ def construir_tablas_salida(resultados: Dict[str, Any]) -> Tuple[List[Dict[str, 
             {
                 "Fecha entrada": fila.get("fecha_entrada"),
                 "Fecha salida": fila.get("fecha_salida"),
-                "Modulo activo": (
-                    "LONG_TREND"
-                    if "QQQ>SMA50" in str(fila.get("senal_entrada", ""))
-                    else "SHORT_TREND"
-                    if "QQQ<SMA50" in str(fila.get("senal_entrada", ""))
-                    else ""
-                ),
                 "Señal entrada": fila.get("senal_entrada"),
-                "Precio entrada": fila.get("precio_entrada"),
-                "Precio salida": fila.get("precio_salida"),
-                "Unidades": fila.get("unidades"),
                 "Motivo salida": fila.get("motivo_salida"),
-                "Beneficio acumulado €": fila.get("beneficio_acumulado_eur"),
-                "Rentabilidad %": fila.get("rentabilidad_pct"),
-                "Capital acumulado €": fila.get("capital_acumulado_eur"),
                 "Beneficio neto €": fila.get("beneficio_neto_eur"),
-                "Regimen vigente": fila.get("regimen_vigente", fila.get("regimen_entrada")),
-                "Motivo régimen": fila.get("motivo_regimen"),
-                "Porcentaje capital usado": fila.get("porcentaje_real_invertido"),
-                "Capital antes entrada €": fila.get("capital_antes_eur"),
+                "Rentabilidad %": fila.get("rentabilidad_pct"),
+                "score_regimen": fila.get("score_regimen"),
+                "Score regimen 2": fila.get("score_regimen"),
+                "Etiqueta regimen 2": fila.get("regimen_vigente", fila.get("regimen_entrada")),
+                "Sizing 2": fila.get("porcentaje_objetivo_entrada"),
+                "Score funcionamiento sistema 2": "",
+                "Funcionamiento sistema 2": "",
+                "Ajuste funcionamiento": "",
+                "Sizing final": fila.get("porcentaje_real_invertido"),
+                "Modo defensa": fila.get("regimen_entrada"),
                 "QQQ > SMA200": fila.get("qqq_mayor_sma200"),
                 "Retorno 63": fila.get("retorno_63"),
+                "ret20": "",
+                "atr20_pct": "",
                 "Cruces SMA50": fila.get("cruces_sma50_ventana"),
+                "Unidades": fila.get("unidades"),
+                "Porcentaje capital usado": fila.get("porcentaje_real_invertido"),
+                "Capital antes entrada €": fila.get("capital_antes_eur"),
+                "Max ganancia flotante €": fila.get("max_ganancia_flotante_eur"),
+                "Max perdida flotante €": fila.get("max_perdida_flotante_eur"),
+                "Max ganancia flotante %": fila.get("max_ganancia_flotante_pct"),
+                "Max perdida flotante %": fila.get("max_perdida_flotante_pct"),
+                "Fecha max ganancia flotante": fila.get("fecha_max_ganancia_flotante"),
+                "Fecha max perdida flotante": fila.get("fecha_max_perdida_flotante"),
+                "Regimen vigente": fila.get("regimen_vigente", fila.get("regimen_entrada")),
+                "Motivo régimen": fila.get("motivo_regimen"),
             }
         )
 
@@ -434,6 +446,14 @@ def _es_momento_revision_regimen(
     return semana_actual != ultima_revision_semana
 
 
+def calcular_beneficio_flotante(posicion: OperacionAbierta, precio_actual: float) -> float:
+    if posicion.modulo_activo == REGIMEN_LONG_TREND:
+        return (precio_actual - posicion.precio_entrada) * posicion.unidades
+    if posicion.modulo_activo == REGIMEN_SHORT_TREND:
+        return (posicion.precio_entrada - precio_actual) * posicion.unidades
+    return 0.0
+
+
 # ============================================================
 # PREPARAR DATOS
 # ============================================================
@@ -637,6 +657,23 @@ def ejecutar_meta_bot(
                     "capital_antes_eur": round(operacion_abierta.capital_antes_eur, 2),
                     "capital_acumulado_eur": round(capital_actual, 2),
                     "maximo_desde_entrada": round(operacion_abierta.maximo_desde_entrada, 6),
+                    "minimo_desde_entrada": round(operacion_abierta.minimo_desde_entrada, 6),
+                    "max_ganancia_flotante_eur": round(operacion_abierta.max_ganancia_flotante_eur, 2),
+                    "max_perdida_flotante_eur": round(operacion_abierta.max_perdida_flotante_eur, 2),
+                    "max_ganancia_flotante_pct": round(
+                        (operacion_abierta.max_ganancia_flotante_eur / operacion_abierta.capital_antes_eur * 100.0)
+                        if operacion_abierta.capital_antes_eur > 0
+                        else 0.0,
+                        4,
+                    ),
+                    "max_perdida_flotante_pct": round(
+                        (operacion_abierta.max_perdida_flotante_eur / operacion_abierta.capital_antes_eur * 100.0)
+                        if operacion_abierta.capital_antes_eur > 0
+                        else 0.0,
+                        4,
+                    ),
+                    "fecha_max_ganancia_flotante": operacion_abierta.fecha_max_ganancia_flotante,
+                    "fecha_max_perdida_flotante": operacion_abierta.fecha_max_perdida_flotante,
                     "stop_trailing": round(stop_trailing, 6),
                 }
             )
@@ -670,6 +707,10 @@ def ejecutar_meta_bot(
                     capital_antes_eur=capital_actual,
                     maximo_desde_entrada=qqq3_open_manana,
                     minimo_desde_entrada=qqq3_open_manana,
+                    max_ganancia_flotante_eur=0.0,
+                    max_perdida_flotante_eur=0.0,
+                    fecha_max_ganancia_flotante=manana["fecha"],
+                    fecha_max_perdida_flotante=manana["fecha"],
                     senal_entrada=(
                         f"QQQ>SMA{PERIODO_MEDIA_LARGA} x{DIAS_CONFIRMACION_ENTRADA}"
                         if modulo_entrada_pendiente == REGIMEN_LONG_TREND
@@ -748,6 +789,19 @@ def ejecutar_meta_bot(
                     }
 
         else:
+            beneficio_flotante_hoy = calcular_beneficio_flotante(operacion_abierta, float(qqq3_close_hoy))
+            if beneficio_flotante_hoy > operacion_abierta.max_ganancia_flotante_eur:
+                operacion_abierta.max_ganancia_flotante_eur = beneficio_flotante_hoy
+                operacion_abierta.fecha_max_ganancia_flotante = hoy["fecha"]
+            if beneficio_flotante_hoy < operacion_abierta.max_perdida_flotante_eur:
+                operacion_abierta.max_perdida_flotante_eur = beneficio_flotante_hoy
+                operacion_abierta.fecha_max_perdida_flotante = hoy["fecha"]
+
+            if beneficio_flotante_hoy <= STOP_MONETARIO_EUR:
+                salida_pendiente = True
+                motivo_salida_pendiente = MOTIVO_SALIDA_STOP_MONETARIO
+                continue
+
             if operacion_abierta.modulo_activo == REGIMEN_LONG_TREND:
                 motivo_salida = modulo_long_trend.senal_salida(hoy, operacion_abierta)
                 if motivo_salida:
@@ -919,7 +973,8 @@ if __name__ == "__main__":
     resultados = ejecutar_bot()
     tabla_resumen_anual, tabla_detalle_operaciones = construir_tablas_salida(resultados)
 
-    print(f"Version sistema: {resultados['version_bot']}\n")
+    print(f"Version sistema: {resultados['version_bot']}")
+    print()
     imprimir_tabla_tsv(
         [
             "Año",
@@ -939,23 +994,35 @@ if __name__ == "__main__":
         [
             "Fecha entrada",
             "Fecha salida",
-            "Modulo activo",
             "Señal entrada",
-            "Precio entrada",
-            "Precio salida",
-            "Unidades",
             "Motivo salida",
-            "Beneficio acumulado €",
-            "Rentabilidad %",
-            "Capital acumulado €",
             "Beneficio neto €",
-            "Regimen vigente",
-            "Motivo régimen",
-            "Porcentaje capital usado",
-            "Capital antes entrada €",
+            "Rentabilidad %",
+            "score_regimen",
+            "Score regimen 2",
+            "Etiqueta regimen 2",
+            "Sizing 2",
+            "Score funcionamiento sistema 2",
+            "Funcionamiento sistema 2",
+            "Ajuste funcionamiento",
+            "Sizing final",
+            "Modo defensa",
             "QQQ > SMA200",
             "Retorno 63",
+            "ret20",
+            "atr20_pct",
             "Cruces SMA50",
+            "Unidades",
+            "Porcentaje capital usado",
+            "Capital antes entrada €",
+            "Max ganancia flotante €",
+            "Max perdida flotante €",
+            "Max ganancia flotante %",
+            "Max perdida flotante %",
+            "Fecha max ganancia flotante",
+            "Fecha max perdida flotante",
+            "Regimen vigente",
+            "Motivo régimen",
         ],
         tabla_detalle_operaciones,
     )
