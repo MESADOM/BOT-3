@@ -15,7 +15,7 @@ import SORT as modulo_short_trend
 # CONFIG
 # ============================================================
 
-VERSION_SISTEMA = "2.2.2"
+VERSION_SISTEMA = "2.2.4"
 
 BASE_DIR = Path(__file__).resolve().parent
 DIR_DATOS = BASE_DIR / "datos"
@@ -87,6 +87,22 @@ class OperacionAbierta:
     cruces_sma50_ventana: int
     cruces_estado: str
     motivo_regimen: str
+    score_regimen_2: float
+    etiqueta_regimen_2: str
+    sizing_2: float
+    score_funcionamiento_sistema_2: float
+    funcionamiento_sistema_2: str
+    ajuste_funcionamiento: float
+    sizing_final: float
+    modo_defensa: str
+    ret20: Optional[float]
+    atr20_pct: Optional[float]
+    max_ganancia_flotante_eur: float
+    max_perdida_flotante_eur: float
+    max_ganancia_flotante_pct: float
+    max_perdida_flotante_pct: float
+    fecha_max_ganancia_flotante: datetime
+    fecha_max_perdida_flotante: datetime
 
 
 @dataclass
@@ -155,7 +171,7 @@ def _serializar_tsv(value: Any) -> str:
             return ""
         texto = f"{value:.10f}".rstrip("0").rstrip(".")
         texto = "0" if texto in {"", "-0"} else texto
-        return texto.replace(".", ",")
+        return texto
     return str(value).replace("\t", " ").replace("\r", " ").replace("\n", " ")
 
 
@@ -214,7 +230,23 @@ def construir_tablas_salida(resultados: Dict[str, Any]) -> Tuple[List[Dict[str, 
                 "Capital antes entrada €": fila.get("capital_antes_eur"),
                 "QQQ > SMA200": fila.get("qqq_mayor_sma200"),
                 "Retorno 63": fila.get("retorno_63"),
+                "ret20": fila.get("ret20"),
+                "atr20_pct": fila.get("atr20_pct"),
                 "Cruces SMA50": fila.get("cruces_sma50_ventana"),
+                "Score regimen 2": fila.get("score_regimen_2"),
+                "Etiqueta regimen 2": fila.get("etiqueta_regimen_2"),
+                "Sizing 2": fila.get("sizing_2"),
+                "Score funcionamiento sistema 2": fila.get("score_funcionamiento_sistema_2"),
+                "Funcionamiento sistema 2": fila.get("funcionamiento_sistema_2"),
+                "Ajuste funcionamiento": fila.get("ajuste_funcionamiento"),
+                "Sizing final": fila.get("sizing_final"),
+                "Modo defensa": fila.get("modo_defensa"),
+                "Max ganancia flotante €": fila.get("max_ganancia_flotante_eur"),
+                "Max perdida flotante €": fila.get("max_perdida_flotante_eur"),
+                "Max ganancia flotante %": fila.get("max_ganancia_flotante_pct"),
+                "Max perdida flotante %": fila.get("max_perdida_flotante_pct"),
+                "Fecha max ganancia flotante": fila.get("fecha_max_ganancia_flotante"),
+                "Fecha max perdida flotante": fila.get("fecha_max_perdida_flotante"),
             }
         )
 
@@ -323,6 +355,261 @@ def _calcular_cruces_sma50(closes: List[float], idx: int) -> int:
             ultimo_signo = signo_actual
 
     return cruces
+
+
+def calcular_ret20(closes: List[float], idx: int) -> Optional[float]:
+    if idx < 20:
+        return None
+    close_pasado = closes[idx - 20]
+    if close_pasado <= 0:
+        return None
+    return (closes[idx] / close_pasado) - 1.0
+
+
+def calcular_atr20_pct(
+    highs: List[Optional[float]],
+    lows: List[Optional[float]],
+    closes: List[float],
+    idx: int,
+) -> Optional[float]:
+    if idx < 20:
+        return None
+
+    true_ranges: List[float] = []
+    for j in range(idx - 19, idx + 1):
+        high = highs[j]
+        low = lows[j]
+        close_prev = closes[j - 1] if j > 0 else None
+        if high is None or low is None or close_prev is None:
+            return None
+        tr = max(high - low, abs(high - close_prev), abs(low - close_prev))
+        true_ranges.append(tr)
+
+    atr20 = sum(true_ranges) / 20.0
+    close_actual = closes[idx]
+    if close_actual <= 0:
+        return None
+    return atr20 / close_actual
+
+
+def clasificar_etiqueta_regimen_2(score_regimen_2: float) -> str:
+    if score_regimen_2 >= 3:
+        return "FAVORABLE"
+    if score_regimen_2 >= 0:
+        return "MIXTO"
+    return "PROBLEMATICO"
+
+
+def degradar_etiqueta_regimen_2_si_impulso_corto_debil(
+    etiqueta_regimen_2: str,
+    ret20: Optional[float],
+    retorno_63: Optional[float],
+) -> str:
+    if ret20 is None or retorno_63 is None:
+        return etiqueta_regimen_2
+    if ret20 <= 0 and retorno_63 < 0.02:
+        if etiqueta_regimen_2 == "FAVORABLE":
+            return "MIXTO"
+        if etiqueta_regimen_2 == "MIXTO":
+            return "PROBLEMATICO"
+    return etiqueta_regimen_2
+
+
+def calcular_score_regimen_2(
+    qqq_close: float,
+    sma50: Optional[float],
+    sma200_actual: Optional[float],
+    sma200_hace_20: Optional[float],
+    retorno_63: Optional[float],
+    ret20: Optional[float],
+    atr20_pct: Optional[float],
+    cruces_sma50_ventana: Optional[int],
+) -> Dict[str, Any]:
+    sma200_pendiente_20_2: Optional[float] = None
+    if sma200_actual is not None and sma200_hace_20 is not None and sma200_hace_20 > 0:
+        sma200_pendiente_20_2 = (sma200_actual / sma200_hace_20) - 1.0
+
+    dist_sma50_2: Optional[float] = None
+    if sma50 is not None and sma50 > 0:
+        dist_sma50_2 = (qqq_close / sma50) - 1.0
+
+    aceleracion_2: Optional[float] = None
+    if ret20 is not None and retorno_63 is not None:
+        aceleracion_2 = ret20 - retorno_63
+
+    score_nivel_2 = 0
+    if sma200_actual is not None and sma200_pendiente_20_2 is not None:
+        if qqq_close > sma200_actual and sma200_pendiente_20_2 > 0:
+            score_nivel_2 = 2
+        elif qqq_close > sma200_actual and sma200_pendiente_20_2 <= 0:
+            score_nivel_2 = 1
+        elif qqq_close <= sma200_actual and sma200_pendiente_20_2 > 0:
+            score_nivel_2 = -1
+        else:
+            score_nivel_2 = -2
+
+    score_velocidad_2 = 0
+    if retorno_63 is not None:
+        if retorno_63 > 0.08:
+            score_velocidad_2 = 2
+        elif retorno_63 > 0.03:
+            score_velocidad_2 = 1
+        elif retorno_63 >= 0:
+            score_velocidad_2 = 0
+        elif retorno_63 > -0.03:
+            score_velocidad_2 = -1
+        else:
+            score_velocidad_2 = -2
+
+    score_aceleracion_2 = 0
+    if aceleracion_2 is not None:
+        if aceleracion_2 > 0.03:
+            score_aceleracion_2 = 1
+        elif aceleracion_2 < -0.02:
+            score_aceleracion_2 = -1
+
+    score_cruces_2 = 0
+    if cruces_sma50_ventana is not None:
+        if cruces_sma50_ventana <= 1:
+            score_cruces_2 = 1
+        elif cruces_sma50_ventana >= 4:
+            score_cruces_2 = -1
+
+    score_atr_2 = 0
+    if atr20_pct is not None:
+        if atr20_pct < 0.025:
+            score_atr_2 = 1
+        elif atr20_pct > 0.04:
+            score_atr_2 = -1
+
+    score_extension_2 = 0
+    if dist_sma50_2 is not None and dist_sma50_2 > 0.10:
+        score_extension_2 = -1
+
+    score_regimen_2 = (
+        score_nivel_2
+        + score_velocidad_2
+        + score_aceleracion_2
+        + score_cruces_2
+        + score_atr_2
+        + score_extension_2
+    )
+    etiqueta_regimen_2 = clasificar_etiqueta_regimen_2(score_regimen_2)
+    etiqueta_regimen_2 = degradar_etiqueta_regimen_2_si_impulso_corto_debil(
+        etiqueta_regimen_2=etiqueta_regimen_2,
+        ret20=ret20,
+        retorno_63=retorno_63,
+    )
+
+    sizing_2 = 0.80
+    if etiqueta_regimen_2 == "FAVORABLE":
+        sizing_2 = 1.00
+    elif etiqueta_regimen_2 == "MIXTO":
+        sizing_2 = 0.90
+
+    return {
+        "sma200_pendiente_20_2": sma200_pendiente_20_2,
+        "dist_sma50_2": dist_sma50_2,
+        "aceleracion_2": aceleracion_2,
+        "score_nivel_2": score_nivel_2,
+        "score_velocidad_2": score_velocidad_2,
+        "score_aceleracion_2": score_aceleracion_2,
+        "score_cruces_2": score_cruces_2,
+        "score_atr_2": score_atr_2,
+        "score_extension_2": score_extension_2,
+        "score_regimen_2": score_regimen_2,
+        "etiqueta_regimen_2": etiqueta_regimen_2,
+        "sizing_2": sizing_2,
+    }
+
+
+def clasificar_funcionamiento_sistema_2(score: float) -> str:
+    if score >= 2:
+        return "FUERTE"
+    if score >= 0:
+        return "NEUTRO"
+    return "DEBIL"
+
+
+def calcular_score_funcionamiento_sistema_2(operaciones_previas: List[Dict[str, Any]]) -> float:
+    previas = operaciones_previas[-4:]
+    rent_previas = [float(x.get("rentabilidad_pct", 0.0)) for x in previas]
+    if not previas:
+        return 0.0
+
+    media = sum(rent_previas) / len(rent_previas)
+    maximo = max(rent_previas)
+    minimo = min(rent_previas)
+    ganadoras = sum(1 for r in rent_previas if r > 0)
+
+    score_a = 2.0 if media > 2 else 1.0 if media > 0 else -1.0
+    score_b = 1.0 if maximo > 10 else 0.5 if maximo > 5 else 0.0
+    score_c = -2.0 if minimo < -8 else -1.0 if minimo < -5 else 0.0
+    score_d = 1.0 if ganadoras >= 3 else -1.0 if ganadoras <= 1 else 0.0
+    score_e = -1.0 if rent_previas[-1] < -3 else 0.0
+    score_f = -1.0 if len(rent_previas) >= 2 and rent_previas[-1] < 0 and rent_previas[-2] < 0 else 0.0
+    return score_a + score_b + score_c + score_d + score_e + score_f
+
+
+def calcular_ajuste_funcionamiento(funcionamiento_sistema_2: str) -> float:
+    if funcionamiento_sistema_2 == "FUERTE":
+        return 1.00
+    if funcionamiento_sistema_2 == "NEUTRO":
+        return 0.95
+    return 0.80
+
+
+def calcular_sizing_final(sizing_2: float, ajuste_funcionamiento: float) -> float:
+    return float(sizing_2) * float(ajuste_funcionamiento)
+
+
+def calcular_modo_defensa(etiqueta_regimen_2: str, funcionamiento_sistema_2: str) -> str:
+    if etiqueta_regimen_2 == "PROBLEMATICO" and funcionamiento_sistema_2 == "DEBIL":
+        return "DEFENSA_FUERTE"
+    if etiqueta_regimen_2 == "PROBLEMATICO" or funcionamiento_sistema_2 == "DEBIL":
+        return "DEFENSA"
+    return "NORMAL"
+
+
+def inicializar_metricas_flotantes_operacion(operacion: OperacionAbierta) -> None:
+    operacion.max_ganancia_flotante_eur = 0.0
+    operacion.max_perdida_flotante_eur = 0.0
+    operacion.max_ganancia_flotante_pct = 0.0
+    operacion.max_perdida_flotante_pct = 0.0
+    operacion.fecha_max_ganancia_flotante = operacion.fecha_entrada
+    operacion.fecha_max_perdida_flotante = operacion.fecha_entrada
+
+
+def calcular_resultado_flotante_operacion(
+    operacion: OperacionAbierta,
+    precio_actual: float,
+) -> Tuple[float, float]:
+    if operacion.modulo_activo == REGIMEN_LONG_TREND:
+        beneficio_flotante_eur = (precio_actual - operacion.precio_entrada) * operacion.unidades
+    elif operacion.modulo_activo == REGIMEN_SHORT_TREND:
+        beneficio_flotante_eur = (operacion.precio_entrada - precio_actual) * operacion.unidades
+    else:
+        beneficio_flotante_eur = 0.0
+
+    capital_ref = operacion.capital_antes_eur
+    beneficio_flotante_pct = (beneficio_flotante_eur / capital_ref) * 100.0 if capital_ref > 0 else 0.0
+    return beneficio_flotante_eur, beneficio_flotante_pct
+
+
+def actualizar_metricas_flotantes_operacion(
+    operacion: OperacionAbierta,
+    fecha_actual: datetime,
+    precio_actual: float,
+) -> None:
+    beneficio_eur, beneficio_pct = calcular_resultado_flotante_operacion(operacion, precio_actual)
+    if beneficio_eur > operacion.max_ganancia_flotante_eur:
+        operacion.max_ganancia_flotante_eur = beneficio_eur
+        operacion.max_ganancia_flotante_pct = beneficio_pct
+        operacion.fecha_max_ganancia_flotante = fecha_actual
+    if beneficio_eur < operacion.max_perdida_flotante_eur:
+        operacion.max_perdida_flotante_eur = beneficio_eur
+        operacion.max_perdida_flotante_pct = beneficio_pct
+        operacion.fecha_max_perdida_flotante = fecha_actual
 
 
 def calcular_variables_regimen(closes: List[float], idx: int) -> Dict[str, Any]:
@@ -453,6 +740,8 @@ def preparar_datos(
 
     rows: List[Dict[str, Any]] = []
     closes: List[float] = []
+    highs: List[Optional[float]] = []
+    lows: List[Optional[float]] = []
     ultimas_senales: List[bool] = []
     ultimas_senales_short: List[bool] = []
     n_confirmacion = max(1, int(DIAS_CONFIRMACION_ENTRADA))
@@ -469,6 +758,9 @@ def preparar_datos(
         "cruces_sma50_ventana": 0,
         "cruces_estado": "NO_ALTO",
         "motivo_regimen": "estado inicial",
+        "score_regimen_2": 0.0,
+        "etiqueta_regimen_2": "MIXTO",
+        "sizing_2": 0.90,
     }
 
     for fecha in fechas:
@@ -488,6 +780,11 @@ def preparar_datos(
             "cruces_estado": ultima_info_regimen["cruces_estado"],
             "motivo_regimen": ultima_info_regimen["motivo_regimen"],
             "meta_regimen": REGIMEN_NO_TRADE,
+            "ret20": None,
+            "atr20_pct": None,
+            "score_regimen_2": ultima_info_regimen.get("score_regimen_2", 0.0),
+            "etiqueta_regimen_2": ultima_info_regimen.get("etiqueta_regimen_2", "MIXTO"),
+            "sizing_2": ultima_info_regimen.get("sizing_2", 0.90),
         }
 
         close = row["qqq_close"]
@@ -503,8 +800,12 @@ def preparar_datos(
 
         close_float = float(close)
         closes.append(close_float)
+        highs.append(map_qqq.get(fecha, {}).get("qqq_high"))
+        lows.append(map_qqq.get(fecha, {}).get("qqq_low"))
 
         sma50 = _media_simple(closes, len(closes) - 1, PERIODO_MEDIA_LARGA)
+        ret20 = calcular_ret20(closes, len(closes) - 1)
+        atr20_pct = calcular_atr20_pct(highs, lows, closes, len(closes) - 1)
 
         row["sma50"] = sma50
         row["qqq_media_larga"] = sma50
@@ -539,6 +840,26 @@ def preparar_datos(
         row["cruces_sma50_ventana"] = ultima_info_regimen["cruces_sma50_ventana"]
         row["cruces_estado"] = ultima_info_regimen["cruces_estado"]
         row["motivo_regimen"] = ultima_info_regimen["motivo_regimen"]
+        row["ret20"] = ret20
+        row["atr20_pct"] = atr20_pct
+
+        sma200_actual = _media_simple(closes, len(closes) - 1, PERIODO_SMA200_REGIMEN)
+        sma200_hace_20: Optional[float] = None
+        idx_sma_20 = len(closes) - 1 - 20
+        if idx_sma_20 >= 0:
+            sma200_hace_20 = _media_simple(closes, idx_sma_20, PERIODO_SMA200_REGIMEN)
+
+        regimen_2 = calcular_score_regimen_2(
+            qqq_close=close_float,
+            sma50=sma50,
+            sma200_actual=sma200_actual,
+            sma200_hace_20=sma200_hace_20,
+            retorno_63=row.get("retorno_63"),
+            ret20=ret20,
+            atr20_pct=atr20_pct,
+            cruces_sma50_ventana=row.get("cruces_sma50_ventana"),
+        )
+        row.update(regimen_2)
 
         row["meta_regimen"] = detectar_meta_regimen(row)
 
@@ -594,6 +915,22 @@ def ejecutar_meta_bot(
             if operacion_abierta.capital_antes_eur > 0:
                 rentabilidad_pct = (beneficio_neto / operacion_abierta.capital_antes_eur) * 100.0
 
+            # Incluir explícitamente el punto final real de salida en el recorrido flotante.
+            fecha_salida_real = manana["fecha"]
+            if beneficio_neto > operacion_abierta.max_ganancia_flotante_eur:
+                operacion_abierta.max_ganancia_flotante_eur = beneficio_neto
+                operacion_abierta.fecha_max_ganancia_flotante = fecha_salida_real
+            if beneficio_neto < operacion_abierta.max_perdida_flotante_eur:
+                operacion_abierta.max_perdida_flotante_eur = beneficio_neto
+                operacion_abierta.fecha_max_perdida_flotante = fecha_salida_real
+
+            if rentabilidad_pct > operacion_abierta.max_ganancia_flotante_pct:
+                operacion_abierta.max_ganancia_flotante_pct = rentabilidad_pct
+                operacion_abierta.fecha_max_ganancia_flotante = fecha_salida_real
+            if rentabilidad_pct < operacion_abierta.max_perdida_flotante_pct:
+                operacion_abierta.max_perdida_flotante_pct = rentabilidad_pct
+                operacion_abierta.fecha_max_perdida_flotante = fecha_salida_real
+
             capital_actual += beneficio_neto
             beneficio_acumulado_eur = capital_actual - CAPITAL_INICIAL_EUR
             if operacion_abierta.modulo_activo == REGIMEN_LONG_TREND:
@@ -625,6 +962,16 @@ def ejecutar_meta_bot(
                     "cruces_sma50_ventana": operacion_abierta.cruces_sma50_ventana,
                     "cruces_estado": operacion_abierta.cruces_estado,
                     "motivo_regimen": operacion_abierta.motivo_regimen,
+                    "score_regimen_2": round(float(operacion_abierta.score_regimen_2), 4),
+                    "etiqueta_regimen_2": operacion_abierta.etiqueta_regimen_2,
+                    "sizing_2": round(float(operacion_abierta.sizing_2), 4),
+                    "score_funcionamiento_sistema_2": round(float(operacion_abierta.score_funcionamiento_sistema_2), 4),
+                    "funcionamiento_sistema_2": operacion_abierta.funcionamiento_sistema_2,
+                    "ajuste_funcionamiento": round(float(operacion_abierta.ajuste_funcionamiento), 4),
+                    "sizing_final": round(float(operacion_abierta.sizing_final), 4),
+                    "modo_defensa": operacion_abierta.modo_defensa,
+                    "ret20": operacion_abierta.ret20,
+                    "atr20_pct": operacion_abierta.atr20_pct,
                     "porcentaje_objetivo_entrada": round(operacion_abierta.porcentaje_objetivo_entrada, 4),
                     "max_unidades_entrada": int(operacion_abierta.max_unidades_entrada),
                     "capital_objetivo_entrada_eur": round(operacion_abierta.capital_objetivo_entrada_eur, 2),
@@ -638,6 +985,12 @@ def ejecutar_meta_bot(
                     "capital_acumulado_eur": round(capital_actual, 2),
                     "maximo_desde_entrada": round(operacion_abierta.maximo_desde_entrada, 6),
                     "stop_trailing": round(stop_trailing, 6),
+                    "max_ganancia_flotante_eur": round(operacion_abierta.max_ganancia_flotante_eur, 2),
+                    "max_perdida_flotante_eur": round(operacion_abierta.max_perdida_flotante_eur, 2),
+                    "max_ganancia_flotante_pct": round(operacion_abierta.max_ganancia_flotante_pct, 4),
+                    "max_perdida_flotante_pct": round(operacion_abierta.max_perdida_flotante_pct, 4),
+                    "fecha_max_ganancia_flotante": operacion_abierta.fecha_max_ganancia_flotante,
+                    "fecha_max_perdida_flotante": operacion_abierta.fecha_max_perdida_flotante,
                 }
             )
 
@@ -648,8 +1001,9 @@ def ejecutar_meta_bot(
 
         if entrada_pendiente and operacion_abierta is None:
             porcentaje_objetivo, max_unidades = obtener_parametros_sizing(regimen_entrada_pendiente)
+            sizing_final = float(diagnostico_entrada_pendiente.get("sizing_final", 1.0) or 1.0)
 
-            capital_objetivo = capital_actual * porcentaje_objetivo
+            capital_objetivo = capital_actual * porcentaje_objetivo * sizing_final
             unidades_teoricas = int(math.floor(capital_objetivo / qqq3_open_manana)) if qqq3_open_manana > 0 else 0
             unidades = max(0, min(unidades_teoricas, max_unidades))
             entrada_capada = unidades_teoricas > max_unidades
@@ -691,7 +1045,30 @@ def ejecutar_meta_bot(
                     cruces_sma50_ventana=int(diagnostico_entrada_pendiente.get("cruces_sma50_ventana", 0)),
                     cruces_estado=str(diagnostico_entrada_pendiente.get("cruces_estado", "NO_ALTO")),
                     motivo_regimen=str(diagnostico_entrada_pendiente.get("motivo_regimen", "")),
+                    score_regimen_2=float(diagnostico_entrada_pendiente.get("score_regimen_2", 0.0) or 0.0),
+                    etiqueta_regimen_2=str(diagnostico_entrada_pendiente.get("etiqueta_regimen_2", "MIXTO")),
+                    sizing_2=float(diagnostico_entrada_pendiente.get("sizing_2", 0.90) or 0.90),
+                    score_funcionamiento_sistema_2=float(
+                        diagnostico_entrada_pendiente.get("score_funcionamiento_sistema_2", 0.0) or 0.0
+                    ),
+                    funcionamiento_sistema_2=str(
+                        diagnostico_entrada_pendiente.get("funcionamiento_sistema_2", "NEUTRO")
+                    ),
+                    ajuste_funcionamiento=float(
+                        diagnostico_entrada_pendiente.get("ajuste_funcionamiento", 0.95) or 0.95
+                    ),
+                    sizing_final=sizing_final,
+                    modo_defensa=str(diagnostico_entrada_pendiente.get("modo_defensa", "NORMAL")),
+                    ret20=diagnostico_entrada_pendiente.get("ret20"),
+                    atr20_pct=diagnostico_entrada_pendiente.get("atr20_pct"),
+                    max_ganancia_flotante_eur=0.0,
+                    max_perdida_flotante_eur=0.0,
+                    max_ganancia_flotante_pct=0.0,
+                    max_perdida_flotante_pct=0.0,
+                    fecha_max_ganancia_flotante=manana["fecha"],
+                    fecha_max_perdida_flotante=manana["fecha"],
                 )
+                inicializar_metricas_flotantes_operacion(operacion_abierta)
             else:
                 diagnostico.senales_no_ejecutadas_sin_capital += 1
 
@@ -709,6 +1086,13 @@ def ejecutar_meta_bot(
                 )
 
                 if permitir_entrada:
+                    score_funcionamiento = calcular_score_funcionamiento_sistema_2(operaciones)
+                    funcionamiento = clasificar_funcionamiento_sistema_2(score_funcionamiento)
+                    ajuste_funcionamiento = calcular_ajuste_funcionamiento(funcionamiento)
+                    sizing_2 = float(hoy.get("sizing_2", 0.90) or 0.90)
+                    sizing_final = calcular_sizing_final(sizing_2, ajuste_funcionamiento)
+                    etiqueta_regimen_2 = str(hoy.get("etiqueta_regimen_2", "MIXTO"))
+                    modo_defensa = calcular_modo_defensa(etiqueta_regimen_2, funcionamiento)
                     entrada_pendiente = True
                     modulo_entrada_pendiente = REGIMEN_LONG_TREND
                     regimen_entrada_pendiente = str(hoy.get("regimen_sizing", REGIMEN_DEFENSIVO))
@@ -722,6 +1106,16 @@ def ejecutar_meta_bot(
                         "cruces_sma50_ventana": hoy.get("cruces_sma50_ventana", 0),
                         "cruces_estado": hoy.get("cruces_estado", "NO_ALTO"),
                         "motivo_regimen": hoy.get("motivo_regimen", ""),
+                        "score_regimen_2": hoy.get("score_regimen_2", 0.0),
+                        "etiqueta_regimen_2": etiqueta_regimen_2,
+                        "sizing_2": sizing_2,
+                        "score_funcionamiento_sistema_2": score_funcionamiento,
+                        "funcionamiento_sistema_2": funcionamiento,
+                        "ajuste_funcionamiento": ajuste_funcionamiento,
+                        "sizing_final": sizing_final,
+                        "modo_defensa": modo_defensa,
+                        "ret20": hoy.get("ret20"),
+                        "atr20_pct": hoy.get("atr20_pct"),
                     }
 
             elif meta_regimen_hoy == REGIMEN_SHORT_TREND:
@@ -732,6 +1126,13 @@ def ejecutar_meta_bot(
                 )
 
                 if permitir_entrada:
+                    score_funcionamiento = calcular_score_funcionamiento_sistema_2(operaciones)
+                    funcionamiento = clasificar_funcionamiento_sistema_2(score_funcionamiento)
+                    ajuste_funcionamiento = calcular_ajuste_funcionamiento(funcionamiento)
+                    sizing_2 = float(hoy.get("sizing_2", 0.90) or 0.90)
+                    sizing_final = calcular_sizing_final(sizing_2, ajuste_funcionamiento)
+                    etiqueta_regimen_2 = str(hoy.get("etiqueta_regimen_2", "MIXTO"))
+                    modo_defensa = calcular_modo_defensa(etiqueta_regimen_2, funcionamiento)
                     entrada_pendiente = True
                     modulo_entrada_pendiente = REGIMEN_SHORT_TREND
                     regimen_entrada_pendiente = str(hoy.get("regimen_sizing", REGIMEN_DEFENSIVO))
@@ -745,9 +1146,24 @@ def ejecutar_meta_bot(
                         "cruces_sma50_ventana": hoy.get("cruces_sma50_ventana", 0),
                         "cruces_estado": hoy.get("cruces_estado", "NO_ALTO"),
                         "motivo_regimen": hoy.get("motivo_regimen", ""),
+                        "score_regimen_2": hoy.get("score_regimen_2", 0.0),
+                        "etiqueta_regimen_2": etiqueta_regimen_2,
+                        "sizing_2": sizing_2,
+                        "score_funcionamiento_sistema_2": score_funcionamiento,
+                        "funcionamiento_sistema_2": funcionamiento,
+                        "ajuste_funcionamiento": ajuste_funcionamiento,
+                        "sizing_final": sizing_final,
+                        "modo_defensa": modo_defensa,
+                        "ret20": hoy.get("ret20"),
+                        "atr20_pct": hoy.get("atr20_pct"),
                     }
 
         else:
+            actualizar_metricas_flotantes_operacion(
+                operacion=operacion_abierta,
+                fecha_actual=hoy["fecha"],
+                precio_actual=float(qqq3_close_hoy),
+            )
             if operacion_abierta.modulo_activo == REGIMEN_LONG_TREND:
                 motivo_salida = modulo_long_trend.senal_salida(hoy, operacion_abierta)
                 if motivo_salida:
@@ -955,7 +1371,23 @@ if __name__ == "__main__":
             "Capital antes entrada €",
             "QQQ > SMA200",
             "Retorno 63",
+            "ret20",
+            "atr20_pct",
             "Cruces SMA50",
+            "Score regimen 2",
+            "Etiqueta regimen 2",
+            "Sizing 2",
+            "Score funcionamiento sistema 2",
+            "Funcionamiento sistema 2",
+            "Ajuste funcionamiento",
+            "Sizing final",
+            "Modo defensa",
+            "Max ganancia flotante €",
+            "Max perdida flotante €",
+            "Max ganancia flotante %",
+            "Max perdida flotante %",
+            "Fecha max ganancia flotante",
+            "Fecha max perdida flotante",
         ],
         tabla_detalle_operaciones,
     )
