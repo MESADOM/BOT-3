@@ -121,10 +121,13 @@ def actualizar_estado_interno_posicion(
     posicion,
 ) -> None:
     """
-    Mantiene actualizado el minimo desde entrada para trailing stop short.
+    Mantiene actualizados maximo y minimo desde entrada.
+    - minimo: excursion favorable potencial en short
+    - maximo: excursion adversa potencial en short
     """
     qqq3_close_hoy = float(hoy["qqq3_close"])
     posicion.minimo_desde_entrada = min(posicion.minimo_desde_entrada, qqq3_close_hoy)
+    posicion.maximo_desde_entrada = max(posicion.maximo_desde_entrada, qqq3_close_hoy)
 
 
 def calcular_stop_trailing(posicion) -> float:
