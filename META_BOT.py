@@ -15,7 +15,7 @@ import SORT as modulo_short_trend
 # CONFIG
 # ============================================================
 
-VERSION_SISTEMA = "2.2.2"
+VERSION_SISTEMA = "2.2.4"
 
 BASE_DIR = Path(__file__).resolve().parent
 DIR_DATOS = BASE_DIR / "datos"
@@ -55,6 +55,8 @@ REGIMEN_MEAN_REVERSION = "MEAN_REVERSION"
 REGIMEN_NO_TRADE = "NO_TRADE"
 
 MODO_META = "LONG_SHORT"
+UMBRAL_ACTIVACION_BREAK_EVEN_EUR = 300.0
+MOTIVO_SALIDA_BREAK_EVEN = "BREAK_EVEN_TRAS_300"
 
 
 # ============================================================
@@ -87,6 +89,9 @@ class OperacionAbierta:
     cruces_sma50_ventana: int
     cruces_estado: str
     motivo_regimen: str
+    ganancia_flotante_eur: float = 0.0
+    max_ganancia_flotante_eur: float = 0.0
+    proteccion_break_even_activa: bool = False
 
 
 @dataclass
@@ -638,6 +643,9 @@ def ejecutar_meta_bot(
                     "capital_acumulado_eur": round(capital_actual, 2),
                     "maximo_desde_entrada": round(operacion_abierta.maximo_desde_entrada, 6),
                     "stop_trailing": round(stop_trailing, 6),
+                    "ganancia_flotante_eur_salida": round(operacion_abierta.ganancia_flotante_eur, 2),
+                    "max_ganancia_flotante_eur": round(operacion_abierta.max_ganancia_flotante_eur, 2),
+                    "proteccion_break_even_activa": bool(operacion_abierta.proteccion_break_even_activa),
                 }
             )
 
@@ -748,7 +756,28 @@ def ejecutar_meta_bot(
                     }
 
         else:
+            ganancia_flotante_eur = 0.0
             if operacion_abierta.modulo_activo == REGIMEN_LONG_TREND:
+                ganancia_flotante_eur = (
+                    (float(qqq3_close_hoy) - operacion_abierta.precio_entrada) * operacion_abierta.unidades
+                )
+            elif operacion_abierta.modulo_activo == REGIMEN_SHORT_TREND:
+                ganancia_flotante_eur = (
+                    (operacion_abierta.precio_entrada - float(qqq3_close_hoy)) * operacion_abierta.unidades
+                )
+
+            operacion_abierta.ganancia_flotante_eur = ganancia_flotante_eur
+            operacion_abierta.max_ganancia_flotante_eur = max(
+                operacion_abierta.max_ganancia_flotante_eur,
+                ganancia_flotante_eur,
+            )
+            if operacion_abierta.max_ganancia_flotante_eur >= UMBRAL_ACTIVACION_BREAK_EVEN_EUR:
+                operacion_abierta.proteccion_break_even_activa = True
+
+            if operacion_abierta.proteccion_break_even_activa and operacion_abierta.ganancia_flotante_eur <= 0.0:
+                salida_pendiente = True
+                motivo_salida_pendiente = MOTIVO_SALIDA_BREAK_EVEN
+            elif operacion_abierta.modulo_activo == REGIMEN_LONG_TREND:
                 motivo_salida = modulo_long_trend.senal_salida(hoy, operacion_abierta)
                 if motivo_salida:
                     salida_pendiente = True
