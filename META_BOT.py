@@ -582,17 +582,42 @@ def ejecutar_meta_bot(
 
         if salida_pendiente and operacion_abierta is not None:
             precio_salida = qqq3_open_manana
+            maximo_flotante = max(operacion_abierta.maximo_desde_entrada, precio_salida)
+            minimo_flotante = min(operacion_abierta.minimo_desde_entrada, precio_salida)
+
             if operacion_abierta.modulo_activo == REGIMEN_LONG_TREND:
                 beneficio_bruto = (precio_salida - operacion_abierta.precio_entrada) * operacion_abierta.unidades
+                max_ganancia_flotante_eur = (
+                    (maximo_flotante - operacion_abierta.precio_entrada) * operacion_abierta.unidades
+                ) - COMISION_POR_OPERACION_EUR
+                max_perdida_flotante_eur = (
+                    (minimo_flotante - operacion_abierta.precio_entrada) * operacion_abierta.unidades
+                ) - COMISION_POR_OPERACION_EUR
             elif operacion_abierta.modulo_activo == REGIMEN_SHORT_TREND:
                 beneficio_bruto = (operacion_abierta.precio_entrada - precio_salida) * operacion_abierta.unidades
+                max_ganancia_flotante_eur = (
+                    (operacion_abierta.precio_entrada - minimo_flotante) * operacion_abierta.unidades
+                ) - COMISION_POR_OPERACION_EUR
+                max_perdida_flotante_eur = (
+                    (operacion_abierta.precio_entrada - maximo_flotante) * operacion_abierta.unidades
+                ) - COMISION_POR_OPERACION_EUR
             else:
                 beneficio_bruto = 0.0
+                max_ganancia_flotante_eur = 0.0
+                max_perdida_flotante_eur = 0.0
             beneficio_neto = beneficio_bruto - COMISION_POR_OPERACION_EUR
 
             rentabilidad_pct = 0.0
+            max_ganancia_flotante_pct = 0.0
+            max_perdida_flotante_pct = 0.0
             if operacion_abierta.capital_antes_eur > 0:
                 rentabilidad_pct = (beneficio_neto / operacion_abierta.capital_antes_eur) * 100.0
+                max_ganancia_flotante_pct = (
+                    max_ganancia_flotante_eur / operacion_abierta.capital_antes_eur
+                ) * 100.0
+                max_perdida_flotante_pct = (
+                    max_perdida_flotante_eur / operacion_abierta.capital_antes_eur
+                ) * 100.0
 
             capital_actual += beneficio_neto
             beneficio_acumulado_eur = capital_actual - CAPITAL_INICIAL_EUR
@@ -634,9 +659,12 @@ def ejecutar_meta_bot(
                     "beneficio_neto_eur": round(beneficio_neto, 2),
                     "beneficio_acumulado_eur": round(beneficio_acumulado_eur, 2),
                     "rentabilidad_pct": round(rentabilidad_pct, 4),
+                    "max_ganancia_flotante_pct": round(max_ganancia_flotante_pct, 4),
+                    "max_perdida_flotante_pct": round(max_perdida_flotante_pct, 4),
                     "capital_antes_eur": round(operacion_abierta.capital_antes_eur, 2),
                     "capital_acumulado_eur": round(capital_actual, 2),
-                    "maximo_desde_entrada": round(operacion_abierta.maximo_desde_entrada, 6),
+                    "maximo_desde_entrada": round(maximo_flotante, 6),
+                    "minimo_desde_entrada": round(minimo_flotante, 6),
                     "stop_trailing": round(stop_trailing, 6),
                 }
             )
