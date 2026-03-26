@@ -1,0 +1,18 @@
+[Unit]
+Description=IBKR Paper Trading Bot (VERSION 2.2.7)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/bot/BOT-3
+EnvironmentFile=/opt/bot/BOT-3/.env
+ExecStart=/usr/bin/env bash /opt/bot/BOT-3/start_bot.sh
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
