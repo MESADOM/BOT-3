@@ -15,7 +15,7 @@ import SORT as modulo_short_trend
 # CONFIG
 # ============================================================
 
-VERSION_SISTEMA = "2.2.6"
+VERSION_SISTEMA = "2.2.7"
 
 BASE_DIR = Path(__file__).resolve().parent
 DIR_DATOS = BASE_DIR / "datos"
