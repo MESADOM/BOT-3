@@ -15,7 +15,7 @@ import SORT as modulo_short_trend
 # CONFIG
 # ============================================================
 
-VERSION_SISTEMA = "2.2.4"
+VERSION_SISTEMA = "2.2.6"
 
 BASE_DIR = Path(__file__).resolve().parent
 DIR_DATOS = BASE_DIR / "datos"
@@ -30,6 +30,8 @@ RUTA_SALIDA_RESUMEN = DIR_DATOS / "resumen_anual_generado.csv"
 
 CAPITAL_INICIAL_EUR = 1000.0
 COMISION_POR_OPERACION_EUR = 2.0
+UMBRAL_SALIDA_LOGICA_A_EUR = -200.0
+MOTIVO_SALIDA_LOGICA_A = "STOP_200_RET20_NEG"
 
 PERIODO_MEDIA_LARGA = 50
 DIAS_CONFIRMACION_ENTRADA = 1
@@ -879,6 +881,7 @@ def ejecutar_meta_bot(
     operacion_abierta: Optional[OperacionAbierta] = None
     operaciones: List[Dict[str, Any]] = []
     diagnostico = EstadoDiagnostico()
+    activaciones_logica_a = 0
 
     entrada_pendiente = False
     salida_pendiente = False
@@ -1192,6 +1195,28 @@ def ejecutar_meta_bot(
                 fecha_actual=hoy["fecha"],
                 precio_actual=float(qqq3_close_hoy),
             )
+            ret20_hoy = hoy.get("ret20")
+            beneficio_flotante_eur = 0.0
+            if operacion_abierta.modulo_activo == REGIMEN_LONG_TREND:
+                beneficio_flotante_eur = (
+                    (float(qqq3_close_hoy) - operacion_abierta.precio_entrada) * operacion_abierta.unidades
+                ) - COMISION_POR_OPERACION_EUR
+            elif operacion_abierta.modulo_activo == REGIMEN_SHORT_TREND:
+                beneficio_flotante_eur = (
+                    (operacion_abierta.precio_entrada - float(qqq3_close_hoy)) * operacion_abierta.unidades
+                ) - COMISION_POR_OPERACION_EUR
+
+            condicion_logica_a = (
+                ret20_hoy is not None
+                and float(ret20_hoy) < 0
+                and beneficio_flotante_eur <= UMBRAL_SALIDA_LOGICA_A_EUR
+            )
+            if condicion_logica_a:
+                salida_pendiente = True
+                activaciones_logica_a += 1
+                motivo_salida_pendiente = MOTIVO_SALIDA_LOGICA_A
+                continue
+
             if operacion_abierta.modulo_activo == REGIMEN_LONG_TREND:
                 motivo_salida = modulo_long_trend.senal_salida(hoy, operacion_abierta)
                 if motivo_salida:
@@ -1233,6 +1258,7 @@ def ejecutar_meta_bot(
         )
 
     metricas = crear_metricas_diagnosticas(operaciones_ordenadas, diagnostico)
+    metricas["activaciones_logica_a"] = activaciones_logica_a
     resumen_regimen = crear_resumen_regimen(operaciones_ordenadas)
 
     return operaciones_ordenadas, metricas, diagnostico_regimen_tsv, resumen_regimen
